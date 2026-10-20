@@ -48,6 +48,10 @@ $loggedOut = query_str('logged_out', '') === '1';
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="noindex,nofollow">
     <title>登录 · <?= e($siteName) ?></title>
+    <link rel="icon" href="<?= e(url('assets/favicon.ico')) ?>?v=<?= e(QB_VERSION) ?>" sizes="16x16 32x32 48x48">
+    <link rel="icon" type="image/svg+xml" href="<?= e(url('assets/favicon.svg')) ?>?v=<?= e(QB_VERSION) ?>">
+    <link rel="apple-touch-icon" href="<?= e(url('assets/apple-touch-icon.png')) ?>?v=<?= e(QB_VERSION) ?>">
+    <meta name="theme-color" content="#A6402D">
     <link rel="stylesheet" href="<?= e(admin_url('assets/admin.css')) ?>?v=<?= e(QB_VERSION) ?>">
 </head>
 <body class="login-body">

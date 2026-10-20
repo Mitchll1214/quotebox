@@ -41,6 +41,7 @@ if (!empty($GLOBALS['qb_config']['timezone'])) {
 }
 
 require_once QB_APP . '/Database.php';
+require_once QB_APP . '/Spreadsheet.php';
 require_once QB_APP . '/Auth.php';
 
 /**

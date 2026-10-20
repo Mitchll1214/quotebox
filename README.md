@@ -46,7 +46,8 @@
 | **分类过滤** | 使用后台维护的分类参数调用，例如 `?c=poem`；支持逗号分隔多个分类 |
 | **首次安装向导** | 自动检测环境、创建数据表、创建管理员、写入示例数据与配置文件 |
 | **文料管理** | 新增、编辑、删除、搜索、按分类/状态筛选、分页浏览 |
-| **批量操作** | 批量启用、停用、删除，支持一次导入多条句子 |
+| **批量导入** | 粘贴文本（一行一条）或上传 Excel / CSV；自动跳过表头，CSV 支持 UTF-8 / GBK |
+| **批量操作** | 批量启用、停用、删除；支持导出 CSV 备份，Excel 可直接打开 |
 | **分类维护** | 自定义名称、slug、说明、排序与启用状态；删除分类时文料自动转入未分类 |
 | **站点设置** | 修改站点名称、API 跨域来源、管理员密码 |
 | **零依赖部署** | 纯 PHP + PDO MySQL，不使用框架、Composer、CDN 或外部服务 |
@@ -86,17 +87,17 @@
 | --- | --- | --- |
 | PHP | 7.4 | 8.1 及以上 |
 | 数据库 | MySQL 5.7 / MariaDB 10.2 | MySQL 8.0 / MariaDB 10.6+ |
-| PHP 扩展 | `pdo_mysql`、`session`、`json` | 额外启用 `mbstring` |
+| PHP 扩展 | `pdo_mysql`、`session`、`json` | 额外启用 `mbstring`；导入 `.xlsx` 需要 `zip`（ZipArchive）与 `SimpleXML` |
 | Web 服务器 | Apache 2.4 或 Nginx | Apache（仓库已附带 `.htaccess`） |
 | HTTPS | 可选 | 建议启用 |
 
 需要确认的 PHP 扩展：
 
 ```bash
-php -m | grep -E 'pdo_mysql|session|json'
+php -m | grep -E 'pdo_mysql|session|json|mbstring|zip|SimpleXML'
 ```
 
-不需要 Redis、Memcached、Node.js、Composer 或任何队列服务。`mbstring` 未启用时程序会自动使用兼容回退。
+不需要 Redis、Memcached、Node.js、Composer 或任何队列服务。`mbstring` 未启用时程序会自动使用兼容回退；`zip` / `SimpleXML` 仅用于 `.xlsx` 导入，缺少时可改用 CSV。
 
 <a id="quick-start"></a>
 
@@ -231,6 +232,7 @@ quotebox/
 │   ├── bootstrap.php          # 配置加载、错误处理、数据库连接
 │   ├── helpers.php            # 工具函数、Session、CSRF、设置缓存、分页
 │   ├── Database.php           # PDO 封装与安全查询
+│   ├── Spreadsheet.php        # 文本 / CSV / XLSX 导入解析
 │   ├── Auth.php               # 管理员登录、退出、登录限流
 │   ├── schema.php             # 建表语句定义
 │   └── .htaccess              # 禁止直接访问应用目录
@@ -251,7 +253,10 @@ quotebox/
 │
 └── assets/
     ├── style.css              # 首页样式
-    └── install.css            # 安装向导样式
+    ├── install.css            # 安装向导样式
+    ├── favicon.svg            # 站点图标（矢量，现代浏览器）
+    ├── favicon.ico            # 站点图标（16/32/48 兼容）
+    └── apple-touch-icon.png   # iOS 添加到主屏幕图标
 ```
 
 <a id="api"></a>
@@ -444,7 +449,7 @@ https://你的域名/admin/
 | 页面 | 路径 | 功能 |
 | --- | --- | --- |
 | 概览 | `/admin/index.php` | 查看文料与分类统计、最近添加、API 地址与分类参数 |
-| 文料库 | `/admin/quotes.php` | 新增/编辑/删除文料，搜索、筛选、分页、批量操作、批量导入 |
+| 文料库 | `/admin/quotes.php` | 新增/编辑/删除文料，搜索、筛选、分页、批量操作、批量导入、导出 CSV |
 | 分类 | `/admin/categories.php` | 新建/编辑/删除分类，维护 slug、说明、排序与状态 |
 | 设置 | `/admin/settings.php` | 站点名称、API 跨域来源、修改密码、系统信息 |
 
@@ -458,9 +463,20 @@ https://你的域名/admin/
 | 分类 | 否 | 必须存在 | 不选则为「未分类」 |
 | 状态 | 否 | 启用/停用 | 停用的文料不会被 API 返回 |
 
-### 批量导入
+### 批量导入与导出
 
-在「文料库 → 批量导入」中粘贴文本。每行一条，用 `|` 分隔内容、作者和出处：
+在「文料库 → 批量导入」中可以选择两种方式：粘贴文本，或上传 Excel / CSV。两种方式都需要先选择目标分类（可选「未分类」），导入的文料默认启用，单次最多 2000 条。
+
+#### 方式一：粘贴文本
+
+**一行一条**，直接粘贴即可：
+
+```text
+人生若只如初见，何事秋风悲画扇。
+山有木兮木有枝，心悦君兮君不知。
+```
+
+如需同时填写作者和出处，用 `|`（或制表符）分隔：
 
 ```text
 人生若只如初见，何事秋风悲画扇。|纳兰性德|木兰花·拟古决绝词柬友
@@ -470,11 +486,39 @@ https://你的域名/admin/
 
 规则：
 
-- 只写内容也可以，作者和出处会留空；
+- 一行对应一条文料，可以只写内容，也可以补全作者、出处；
 - 以 `#` 开头的行会被忽略，可当作注释；
-- 支持 `|` 或制表符分隔；
-- 单次最多处理 2000 行，导入后默认启用；
-- 可以选择统一导入到某个分类，或导入为未分类。
+- 首行如果是「内容 | 作者 | 出处」这类表头会自动跳过；
+- 支持 `|` 或制表符分隔。
+
+#### 方式二：上传 Excel / CSV
+
+点击「下载 CSV 模板」可以获得标准表头。列顺序：
+
+| A 列 | B 列 | C 列 |
+| --- | --- | --- |
+| 内容（必填） | 作者 | 出处 |
+
+规则：
+
+- 支持 `.xlsx` 与 `.csv`，只读取第一个工作表；
+- 首行是表头时自动跳过；
+- CSV 自动识别 UTF-8 / GBK 编码，以及逗号、分号、制表符分隔；
+- 文件最大 5 MB，单次最多 2000 条；
+- 旧版 `.xls` 请先在 Excel 中另存为 `.xlsx` 或 CSV；
+- 选择目标分类后，整批文料会导入到该分类。
+
+> Excel 导入使用 PHP 自带的 `ZipArchive` 与 `SimpleXML`，不依赖 PhpSpreadsheet 或 Composer。如果主机未启用 `zip` 扩展，请改用 CSV 导入。
+
+#### 导出 CSV
+
+「文料库」右上角的「导出 CSV」会导出全部文料，包含：
+
+```text
+内容,作者,出处,分类,状态,创建时间
+```
+
+文件使用 UTF-8 BOM 编码，可直接用 Excel 打开，也可以作为迁移或备份的基础数据。
 
 ### 分类与 API 参数
 
@@ -694,6 +738,19 @@ WHERE username = 'admin';
 
 如果主机没有 PHP CLI，可以在本地 PHP 环境生成哈希后再执行 SQL。也可以删除 `config/config.php` 后重新安装，但请注意已有数据表的处理方式。
 
+### Excel 导入失败或提示未启用 ZipArchive
+
+`.xlsx` 导入依赖 PHP 的 `zip`（ZipArchive）与 `SimpleXML` 扩展。若主机未启用：
+
+- 在 Excel 中将文件「另存为 → CSV UTF-8（逗号分隔）」后导入；或
+- 在主机控制面板启用 `zip` / `SimpleXML` 扩展。
+
+旧版 `.xls` 不受支持，请先另存为 `.xlsx` 或 CSV。导入文件最大 5 MB，单次最多 2000 条。
+
+### CSV 导入中文乱码
+
+导入器会自动识别 UTF-8 与 GBK 编码。如果仍然乱码，请在 Excel 中重新「另存为 → CSV UTF-8」后上传，或直接使用 `.xlsx` 导入。
+
 ### API 返回 404
 
 依次检查：
@@ -763,6 +820,7 @@ http://127.0.0.1:8080/install.php
 - 安装向导：`install.php` + `assets/install.css`
 - 管理后台：`admin/*.php` + `admin/assets/admin.css`
 - 后台交互：`admin/assets/admin.js`
+- 站点图标：`assets/favicon.svg`、`assets/favicon.ico`、`assets/apple-touch-icon.png`
 
 项目没有构建步骤，修改后直接刷新页面即可。
 
@@ -783,6 +841,7 @@ http://127.0.0.1:8080/install.php
 | `app/bootstrap.php` | 常量、配置、时区、错误处理、数据库连接 |
 | `app/helpers.php` | 转义、URL、Session、CSRF、设置、分页、格式化 |
 | `app/Database.php` | PDO 连接、占位符展开、查询与写入封装 |
+| `app/Spreadsheet.php` | 文本、CSV、XLSX 导入解析 |
 | `app/Auth.php` | 管理员会话、登录验证、登出、安全跳转 |
 | `app/schema.php` | 四张表的建表 SQL |
 | `install.php` | 安装流程与环境检查 |

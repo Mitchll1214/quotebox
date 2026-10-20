@@ -36,6 +36,10 @@ $categoryCount = count($categories);
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="言匣 QuoteBox —— 轻量随机一言服务。随机返回句子，支持分类筛选，适配个人站点与虚拟主机。">
     <title><?= e($siteName) ?> · 随机一言服务</title>
+    <link rel="icon" href="<?= e(url('assets/favicon.ico')) ?>?v=<?= e(QB_VERSION) ?>" sizes="16x16 32x32 48x48">
+    <link rel="icon" type="image/svg+xml" href="<?= e(url('assets/favicon.svg')) ?>?v=<?= e(QB_VERSION) ?>">
+    <link rel="apple-touch-icon" href="<?= e(url('assets/apple-touch-icon.png')) ?>?v=<?= e(QB_VERSION) ?>">
+    <meta name="theme-color" content="#A6402D">
     <link rel="stylesheet" href="<?= e(url('assets/style.css')) ?>?v=<?= e(QB_VERSION) ?>">
 </head>
 <body>

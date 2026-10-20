@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="言匣 QuoteBox">
+  <title>言匣 QuoteBox</title>
+  <rect width="64" height="64" rx="14" fill="#A6402D"/>
+  <circle cx="32" cy="12.5" r="2.2" fill="#FFF7EC"/>
+  <g fill="#FFF7EC">
+    <rect x="17" y="19.2" width="30" height="3.6" rx="1.8"/>
+    <rect x="22" y="28.2" width="20" height="3.6" rx="1.8"/>
+    <rect x="22" y="36.2" width="20" height="3.6" rx="1.8"/>
+  </g>
+  <rect x="23.6" y="45.6" width="16.8" height="7.8" rx="2" fill="none" stroke="#FFF7EC" stroke-width="3.2"/>
+</svg>

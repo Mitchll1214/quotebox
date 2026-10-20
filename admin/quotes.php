@@ -4,6 +4,55 @@ declare(strict_types=1);
 require __DIR__ . '/_init.php';
 Auth::requireLogin();
 
+$requestedAction = query_str('action');
+
+if ($requestedAction === 'template') {
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="quotebox-import-template.csv"');
+    header('Cache-Control: no-store');
+    echo "\xEF\xBB\xBF";
+
+    $output = fopen('php://output', 'wb');
+    if ($output !== false) {
+        fputcsv($output, array('内容', '作者', '出处'), ',', '"', '\\');
+        fclose($output);
+    }
+    exit;
+}
+
+if ($requestedAction === 'export') {
+    $exportRows = db()->all(
+        'SELECT q.content, q.author, q.source, c.name AS category_name, q.is_active, q.created_at
+         FROM {quotes} q
+         LEFT JOIN {categories} c ON c.id = q.category_id
+         ORDER BY q.id ASC'
+    );
+
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="quotebox-quotes-' . date('Ymd-His') . '.csv"');
+    header('Cache-Control: no-store');
+    echo "\xEF\xBB\xBF";
+
+    $output = fopen('php://output', 'wb');
+    if ($output !== false) {
+        fputcsv($output, array('内容', '作者', '出处', '分类', '状态', '创建时间'), ',', '"', '\\');
+
+        foreach ($exportRows as $row) {
+            fputcsv($output, array(
+                (string) $row['content'],
+                (string) $row['author'],
+                (string) $row['source'],
+                $row['category_name'] !== null ? (string) $row['category_name'] : '未分类',
+                $row['is_active'] ? '启用' : '停用',
+                (string) $row['created_at'],
+            ), ',', '"', '\\');
+        }
+
+        fclose($output);
+    }
+    exit;
+}
+
 $categories = db()->all('SELECT id, name, slug, is_active FROM {categories} ORDER BY sort_order ASC, id ASC');
 
 $listFilters = array();
@@ -156,13 +205,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($postAction === 'import') {
-            $importText = raw_post('import_text', '');
-            $importText = is_string($importText) ? $importText : '';
+            $importMode = post_str('import_mode', 'text');
             $importCategoryId = (int) raw_post('import_category_id', 0);
-
-            if (trim($importText) === '') {
-                throw new RuntimeException('请粘贴要导入的内容。');
-            }
 
             if ($importCategoryId > 0) {
                 $categoryExists = (int) db()->value('SELECT COUNT(*) FROM {categories} WHERE id = ?', array($importCategoryId));
@@ -173,39 +217,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $importCategoryId = 0;
             }
 
-            $lines = preg_split('/\r\n|\r|\n/', $importText);
+            if ($importMode === 'file') {
+                if (!isset($_FILES['import_file']) || !is_array($_FILES['import_file'])) {
+                    throw new RuntimeException('请选择要导入的 Excel 或 CSV 文件。');
+                }
+
+                $importRows = Spreadsheet::parseUpload($_FILES['import_file'], 2000);
+                if (empty($importRows)) {
+                    throw new RuntimeException('文件中没有可导入的句子，请检查第一列内容是否为空。');
+                }
+            } else {
+                $importText = raw_post('import_text', '');
+                $importText = is_string($importText) ? $importText : '';
+
+                if (trim($importText) === '') {
+                    throw new RuntimeException('请粘贴要导入的内容。');
+                }
+
+                $importRows = Spreadsheet::parseText($importText, 2000);
+                if (empty($importRows)) {
+                    throw new RuntimeException('没有解析到可导入的句子，请检查粘贴内容。');
+                }
+            }
+
             $now = date('Y-m-d H:i:s');
             $inserted = 0;
             $skipped = 0;
-            $processed = 0;
 
             $pdo = db()->pdo();
             $pdo->beginTransaction();
 
             try {
-                foreach ($lines as $line) {
-                    $line = trim($line);
-                    if ($line === '' || strpos($line, '#') === 0) {
-                        continue;
-                    }
-
-                    $processed++;
-                    if ($processed > 2000) {
-                        $skipped++;
-                        continue;
-                    }
-
-                    if (strpos($line, '|') !== false) {
-                        $parts = array_map('trim', explode('|', $line));
-                    } elseif (strpos($line, "\t") !== false) {
-                        $parts = array_map('trim', explode("\t", $line));
-                    } else {
-                        $parts = array($line);
-                    }
-
-                    $content = isset($parts[0]) ? $parts[0] : '';
-                    $author = isset($parts[1]) ? $parts[1] : '';
-                    $source = isset($parts[2]) ? $parts[2] : '';
+                foreach ($importRows as $importRow) {
+                    $content = isset($importRow[0]) ? trim((string) $importRow[0]) : '';
+                    $author = isset($importRow[1]) ? trim((string) $importRow[1]) : '';
+                    $source = isset($importRow[2]) ? trim((string) $importRow[2]) : '';
 
                     if ($content === '' || qb_strlen($content) > 2000 || qb_strlen($author) > 100 || qb_strlen($source) > 200) {
                         $skipped++;
@@ -230,10 +276,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw $importError;
             }
 
+            $limitNote = count($importRows) >= 2000 ? '（单次上限为 2000 条，如需导入更多请分批操作）' : '';
+
             if ($inserted > 0) {
-                flash('success', '已导入 ' . $inserted . ' 条文料' . ($skipped > 0 ? '，跳过 ' . $skipped . ' 行。' : '。'));
+                flash('success', '已导入 ' . $inserted . ' 条文料' . ($skipped > 0 ? '，跳过 ' . $skipped . ' 行。' : '。') . $limitNote);
             } else {
-                flash('warning', '没有导入任何内容，请检查格式。');
+                flash('warning', '没有导入任何内容' . ($skipped > 0 ? '，' . $skipped . ' 行格式不正确。' : '，请检查格式。'));
             }
 
             redirect($backUrl);
@@ -441,6 +489,7 @@ require __DIR__ . '/_header.php';
         <p class="page-sub">共 <strong><?= $total ?></strong> 条，按添加时间倒序。</p>
     </div>
     <div class="page-actions">
+        <a class="btn btn-ghost" href="<?= e(admin_url('quotes.php?action=export')) ?>" title="UTF-8 CSV，可用 Excel 直接打开">导出 CSV</a>
         <a class="btn btn-primary" href="<?= e(admin_url('quotes.php?action=edit')) ?>">+ 新增文料</a>
     </div>
 </div>
@@ -592,16 +641,24 @@ require __DIR__ . '/_header.php';
 <details class="card import-card">
     <summary>
         <span>批量导入</span>
-        <small>每行一条，支持「内容 | 作者 | 出处」</small>
+        <small>粘贴文本，或上传 Excel / CSV</small>
     </summary>
-    <form method="post" action="<?= e(admin_url('quotes.php')) ?>">
-        <?= csrf_field() ?>
-        <input type="hidden" name="action" value="import">
-        <?php foreach ($listFilters as $key => $value): ?>
-            <input type="hidden" name="<?= e($key) ?>" value="<?= e($value) ?>">
-        <?php endforeach; ?>
 
-        <div class="form-grid">
+    <div class="import-grid">
+        <form method="post" action="<?= e(admin_url('quotes.php')) ?>" class="import-block">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="import">
+            <input type="hidden" name="import_mode" value="text">
+            <?php foreach ($listFilters as $key => $value): ?>
+                <input type="hidden" name="<?= e($key) ?>" value="<?= e($value) ?>">
+            <?php endforeach; ?>
+
+            <div class="import-head">
+                <h3>粘贴文本</h3>
+                <span class="import-badge">TEXT</span>
+            </div>
+            <p class="import-note">一行一条。如需同时填写作者和出处，用 <code>|</code> 分隔：<code>内容 | 作者 | 出处</code>。以 <code>#</code> 开头的行会被忽略。</p>
+
             <label class="field">
                 <span>导入到分类</span>
                 <select name="import_category_id">
@@ -611,20 +668,53 @@ require __DIR__ . '/_header.php';
                     <?php endforeach; ?>
                 </select>
             </label>
-            <div class="field import-hint">
-                <span>格式说明</span>
-                <p>每行一条；用 <code>|</code> 分隔内容、作者、出处。以 <code>#</code> 开头的行会被忽略。单次最多 2000 条。</p>
+
+            <label class="field">
+                <span>粘贴内容</span>
+                <textarea name="import_text" rows="9" placeholder="人生若只如初见，何事秋风悲画扇。&#10;山有木兮木有枝，心悦君兮君不知。|佚名|越人歌"></textarea>
+            </label>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary" data-confirm="确认导入这些内容？">导入文本</button>
+                <span class="import-limit">单次最多 2000 条</span>
             </div>
-        </div>
+        </form>
 
-        <label class="field">
-            <span>粘贴内容</span>
-            <textarea name="import_text" rows="7" placeholder="人生若只如初见，何事秋风悲画扇。|纳兰性德|木兰花·拟古决绝词柬友"></textarea>
-        </label>
+        <form method="post" action="<?= e(admin_url('quotes.php')) ?>" enctype="multipart/form-data" class="import-block">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="import">
+            <input type="hidden" name="import_mode" value="file">
+            <?php foreach ($listFilters as $key => $value): ?>
+                <input type="hidden" name="<?= e($key) ?>" value="<?= e($value) ?>">
+            <?php endforeach; ?>
 
-        <div class="form-actions">
-            <button type="submit" class="btn btn-primary" data-confirm="确认导入这些内容？">开始导入</button>
-        </div>
-    </form>
+            <div class="import-head">
+                <h3>上传 Excel / CSV</h3>
+                <span class="import-badge">FILE</span>
+            </div>
+            <p class="import-note">第一列内容、第二列作者、第三列出处，列顺序与模板一致。支持 <code>.xlsx</code> 与 <code>.csv</code>，首行表头会自动跳过，CSV 支持 UTF-8 / GBK。</p>
+
+            <label class="field">
+                <span>导入到分类</span>
+                <select name="import_category_id">
+                    <option value="0">未分类</option>
+                    <?php foreach ($categories as $category): ?>
+                        <option value="<?= (int) $category['id'] ?>"><?= e($category['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+
+            <label class="field">
+                <span>选择文件</span>
+                <input type="file" name="import_file" class="file-input" accept=".xlsx,.csv" required>
+                <small>最大 5 MB。旧版 <code>.xls</code> 请先在 Excel 中另存为 <code>.xlsx</code> 或 CSV。</small>
+            </label>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary" data-confirm="确认上传并导入这个文件？">上传并导入</button>
+                <a class="link-mini" href="<?= e(admin_url('quotes.php?action=template')) ?>">下载 CSV 模板</a>
+            </div>
+        </form>
+    </div>
 </details>
 <?php require __DIR__ . '/_footer.php'; ?>
