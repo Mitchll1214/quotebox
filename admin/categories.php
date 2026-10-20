@@ -298,13 +298,13 @@ require __DIR__ . '/_header.php';
                     <span>排序</span>
                     <input type="number" name="sort_order" value="<?= (int) $form['sort_order'] ?>" step="1">
                 </label>
-                <label class="field">
+                <div class="field">
                     <span>状态</span>
-                    <span class="switch-line">
+                    <label class="switch-line">
                         <input type="checkbox" name="is_active" value="1" <?= (int) $form['is_active'] === 1 ? 'checked' : '' ?>>
                         <span>启用</span>
-                    </span>
-                </label>
+                    </label>
+                </div>
             </div>
 
             <div class="form-actions">
