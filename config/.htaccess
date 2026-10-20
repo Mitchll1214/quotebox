@@ -1,0 +1,8 @@
+# 配置目录禁止直接访问（数据库凭据保护）
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+</IfModule>

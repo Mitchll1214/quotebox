@@ -1,0 +1,23 @@
+# QuoteBox —— Apache 配置
+Options -Indexes
+DirectoryIndex index.php
+AddDefaultCharset UTF-8
+
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+</IfModule>
+
+<IfModule mod_alias.c>
+    RedirectMatch 404 "(^|/)\.(git|svn|env)(/|$)"
+</IfModule>
+
+# 阻止访问敏感文件（SQL、备份、日志等）
+<FilesMatch "\.(?:sql|bak|log|ini|dist|lock)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>

@@ -1,0 +1,11 @@
+# QuoteBox 运行配置（含数据库凭据），不要提交
+config/config.php
+
+# 本地与编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+*.bak
+*.sql
